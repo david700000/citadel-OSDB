@@ -17,6 +17,7 @@ const { adminsRouter, formFieldsRouter } = require("./routes/attendance");
 const { initScheduler } = require("./jobs/reminderScheduler");
 
 const app = express();
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 4000;
 
 // Connect to MongoDB
