@@ -1,6 +1,7 @@
 const express = require("express");
 const User = require("../models/User");
 const Message = require("../models/Message");
+const Setting = require("../models/Setting");
 const { requireCMS, requireAuth } = require("../middleware/auth");
 const { sendViaChannels, welcomeMessage } = require("../services/messaging");
 
@@ -77,7 +78,18 @@ router.post("/register/member-worker", async (req, res) => {
 });
 
 async function handleWelcome(user) {
-  const msg = welcomeMessage(user.full_name);
+  let msg = welcomeMessage(user.full_name);
+  try {
+    const customSetting = await Setting.findOne({ key: "welcome_message" });
+    if (customSetting && customSetting.value) {
+      msg = customSetting.value
+        .replace(/{name}/g, user.full_name)
+        .replace(/{church}/g, process.env.CHURCH_NAME || "our church");
+    }
+  } catch (dbErr) {
+    console.warn("[Auto-Welcome] DB load settings failed, using default template:", dbErr.message);
+  }
+
   const channels = ["push", "email", "sms"];
   try {
     await sendViaChannels({ user, subject: `Welcome to ${process.env.CHURCH_NAME || "our church"}!`, message: msg, channels });

@@ -12,6 +12,7 @@ const messagesRouter = require("./routes/messages");
 const remindersRouter = require("./routes/reminders");
 const attendanceRouter = require("./routes/attendance");
 const { adminsRouter, formFieldsRouter } = require("./routes/attendance");
+const settingsRouter = require("./routes/settings");
 
 // Scheduler
 const { initScheduler } = require("./jobs/reminderScheduler");
@@ -57,6 +58,7 @@ app.use("/reminders",   remindersRouter);
 app.use("/attendance",  attendanceRouter);
 app.use("/admins",      adminsRouter);
 app.use("/form-fields", formFieldsRouter);
+app.use("/settings",    settingsRouter);
 
 // ─── ERROR HANDLER ────────────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
