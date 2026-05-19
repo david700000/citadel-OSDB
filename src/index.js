@@ -76,7 +76,7 @@ app.use((err, req, res, next) => {
 
 // ─── START ────────────────────────────────────────────────────────────────────
 app.listen(PORT, async () => {
-  console.log(`\n🚀 Church CMS Backend running on port ${PORT}`);
+  console.log(`\n🚀 Citadel CMS Backend running on port ${PORT}`);
   console.log(`   Environment : ${process.env.NODE_ENV || "development"}`);
   console.log(`   Database    : ${process.env.MONGODB_URI || process.env.DATABASE_URL ? "✅ configured (MongoDB)" : "❌ MONGODB_URI missing"}`);
   console.log(`   SMTP        : ${process.env.SMTP_HOST ? "✅ configured" : "⚠️  not configured (email disabled)"}`);

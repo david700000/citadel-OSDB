@@ -92,7 +92,7 @@ router.post("/login", async (req, res) => {
 router.post("/invite", requireCMS, async (req, res) => {
   try {
     const { email, role, name } = req.body;
-    const validRoles = ["media_admin", "usher_admin", "leader", "financial_admin"];
+    const validRoles = ["media_admin", "usher_admin", "leader", "finance_admin"];
     if (!email || !validRoles.includes(role))
       return res.status(400).json({ error: "Valid email and role required" });
 
@@ -289,7 +289,7 @@ router.post("/forgot-password", async (req, res) => {
         to: admin.email,
         name: admin.name || admin.email,
         subject: `Password Reset OTP - ${churchName}`,
-        message: `Hi ${admin.name || 'Admin'},\n\nYou requested a password reset for your ChurchCMS account.\n\nYour one-time password (OTP) is:\n\n  ${otp}\n\nThis OTP is valid for 15 minutes. Do NOT share it with anyone.\n\nIf you did not request this, please ignore this email — your account remains secure.\n\n${churchName} Team`
+        message: `Hi ${admin.name || 'Admin'},\n\nYou requested a password reset for your Citadel CMS account.\n\nYour one-time password (OTP) is:\n\n  ${otp}\n\nThis OTP is valid for 15 minutes. Do NOT share it with anyone.\n\nIf you did not request this, please ignore this email — your account remains secure.\n\n${churchName} Team`
       });
       console.log(`[ForgotPassword] ✅ OTP email sent to ${normalizedEmail}`);
     } catch (mailErr) {
