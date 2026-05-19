@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require("uuid");
 const Admin = require("../models/Admin");
 const Invite = require("../models/Invite");
 const Session = require("../models/Session");
+const User = require("../models/User");
 const { requireCMS, requireAuth } = require("../middleware/auth");
 const { sendEmail } = require("../services/messaging");
 
@@ -76,14 +77,22 @@ router.post("/login", async (req, res) => {
 router.post("/invite", requireCMS, async (req, res) => {
   try {
     const { email, role, name } = req.body;
-    const validRoles = ["media_admin", "usher_admin", "leader"];
+    const validRoles = ["media_admin", "usher_admin", "leader", "financial_admin"];
     if (!email || !validRoles.includes(role))
       return res.status(400).json({ error: "Valid email and role required" });
 
-    const adminName = name && name.trim() ? name.trim() : email.split("@")[0];
+    let adminName = name && name.trim() ? name.trim() : "";
+    if (!adminName) {
+      const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
+      if (existingUser && existingUser.full_name) {
+        adminName = existingUser.full_name;
+      } else {
+        adminName = email.split("@")[0];
+      }
+    }
     console.log(`[Invite] 📧 Attempting to invite ${email} as ${role} (name: ${adminName})`);
     const tempPassword = Math.floor(10000000 + Math.random() * 90000000).toString();
-    const passwordHash = await bcrypt.hash(tempPassword, 12);
+    const passwordHash = await bcrypt.hash(tempPassword, 10);
 
     const admin = await Admin.create({
       email: email.toLowerCase().trim(),
@@ -141,7 +150,7 @@ router.post("/accept-invite", async (req, res) => {
     
     if (!invite) return res.status(404).json({ error: "Invalid or expired invite token" });
 
-    const passwordHash = await bcrypt.hash(password, 12);
+    const passwordHash = await bcrypt.hash(password, 10);
 
     const admin = await Admin.create({
       email: invite.email,
@@ -186,7 +195,7 @@ router.post("/change-password", requireAuth, async (req, res) => {
     const { password } = req.body;
     if (!password) return res.status(400).json({ error: "New password required" });
 
-    const passwordHash = await bcrypt.hash(password, 12);
+    const passwordHash = await bcrypt.hash(password, 10);
     
     // Check if it's the CMS root (env-based) or a DB admin
     if (req.user.id === "cms") {
@@ -304,7 +313,7 @@ router.post("/reset-password-otp", async (req, res) => {
     }
 
     // All good — update password
-    admin.password_hash = await bcrypt.hash(password, 12);
+    admin.password_hash = await bcrypt.hash(password, 10);
     admin.must_change_password = false;
     admin.otp_hash = null;
     admin.otp_expires_at = null;

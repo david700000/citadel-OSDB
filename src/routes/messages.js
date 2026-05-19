@@ -122,4 +122,15 @@ router.get("/first-timers/:userId", requireRole("media_admin"), async (req, res)
   }
 });
 
+// ─── DELETE /messages/:id ─────────────────────────────────────────────────────
+router.delete("/:id", requireRole("media_admin"), async (req, res) => {
+  try {
+    const deleted = await Message.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: "Message not found" });
+    res.json({ success: true, message: "Message deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

@@ -7,7 +7,7 @@ const AdminSchema = new mongoose.Schema({
     role: { 
         type: String, 
         required: true, 
-        enum: ['media_admin', 'usher_admin', 'leader'] 
+        enum: ['media_admin', 'usher_admin', 'leader', 'financial_admin'] 
     },
     status: { 
         type: String, 
