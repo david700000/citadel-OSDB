@@ -50,19 +50,20 @@ router.post("/login", async (req, res) => {
 // ─── POST /auth/invite ────────────────────────────────────────────────────────
 router.post("/invite", requireCMS, async (req, res) => {
   try {
-    const { email, role } = req.body;
+    const { email, role, name } = req.body;
     const validRoles = ["media_admin", "usher_admin", "leader"];
     if (!email || !validRoles.includes(role))
       return res.status(400).json({ error: "Valid email and role required" });
 
-    console.log(`[Invite] 📧 Attempting to invite ${email} as ${role}`);
+    const adminName = name && name.trim() ? name.trim() : email.split("@")[0];
+    console.log(`[Invite] 📧 Attempting to invite ${email} as ${role} (name: ${adminName})`);
     const tempPassword = Math.floor(10000000 + Math.random() * 90000000).toString();
     const passwordHash = await bcrypt.hash(tempPassword, 12);
 
     const admin = await Admin.create({
       email: email.toLowerCase().trim(),
       password_hash: passwordHash,
-      name: email.split("@")[0],
+      name: adminName,
       role,
       status: 'active',
       must_change_password: true
@@ -76,9 +77,9 @@ router.post("/invite", requireCMS, async (req, res) => {
     try {
       await sendEmail({
         to: email,
-        name: email.split("@")[0],
+        name: adminName,
         subject: `Admin Invitation - ${churchName}`,
-        message: `You have been invited as a ${role.replace("_", " ")} at ${churchName}.\n\nYour temporary credentials are:\nEmail: ${email}\nPassword: ${tempPassword}\n\nPlease login at ${loginUrl} and change your password immediately.`
+        message: `Hi ${adminName},\n\nYou have been invited as a ${role.replace(/_/g, " ")} at ${churchName}.\n\nYour temporary login credentials are:\nEmail: ${email}\nPassword: ${tempPassword}\n\nPlease login at ${loginUrl} and change your password immediately after logging in.\n\nIf you did not expect this email, please ignore it.`
       });
       console.log(`[Invite] ✅ Email sent successfully to ${email}`);
     } catch (mailErr) {
