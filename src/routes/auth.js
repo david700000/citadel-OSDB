@@ -1,9 +1,11 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
+const jwt = require("jsonwebtoken"); // Keep for any legacy endpoints if needed, otherwise optional
+const crypto = require("crypto");
 const { v4: uuidv4 } = require("uuid");
 const Admin = require("../models/Admin");
 const Invite = require("../models/Invite");
+const Session = require("../models/Session");
 const { requireCMS, requireAuth } = require("../middleware/auth");
 const { sendEmail } = require("../services/messaging");
 
@@ -13,6 +15,27 @@ function signToken(payload) {
   return jwt.sign(payload, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || "7d",
   });
+}
+
+async function createSession(userId, role, res) {
+  const token = crypto.randomBytes(64).toString('hex');
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+  await Session.create({
+    user_id: userId,
+    role,
+    token,
+    expires_at: expiresAt
+  });
+
+  res.cookie("sessionId", token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+  });
+
+  return token; // Optional, just in case we still want to return it for mobile
 }
 
 // ─── POST /auth/login ─────────────────────────────────────────────────────────
@@ -29,8 +52,8 @@ router.post("/login", async (req, res) => {
       normalizedEmail === (process.env.CMS_EMAIL || "").toLowerCase().trim() &&
       normalizedPassword === (process.env.CMS_PASSWORD || "").trim()
     ) {
-      const token = signToken({ id: "cms", role: "cms", email });
-      return res.json({ token, role: "cms", name: "CMS Root" });
+      const token = await createSession("cms", "cms", res);
+      return res.json({ token, role: "cms", name: "CMS Root", must_change_password: false });
     }
 
     // Admin account
@@ -40,8 +63,10 @@ router.post("/login", async (req, res) => {
     const valid = await bcrypt.compare(normalizedPassword, admin.password_hash);
     if (!valid) return res.status(401).json({ error: "Invalid credentials" });
 
-    const token = signToken({ id: admin._id, role: admin.role, email: admin.email, name: admin.name });
-    res.json({ token, role: admin.role, name: admin.name, id: admin._id, must_change_password: admin.must_change_password });
+    const token = await createSession(admin._id, admin.role, res);
+    
+    // Only send must_change_password: true when the DB flag is actually set
+    res.json({ token, role: admin.role, name: admin.name, id: admin._id, must_change_password: !!admin.must_change_password });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -129,8 +154,8 @@ router.post("/accept-invite", async (req, res) => {
     invite.status = 'accepted';
     await invite.save();
 
-    const jwtToken = signToken({ id: admin._id, role: admin.role, email: admin.email, name: admin.name });
-    res.json({ token: jwtToken, role: admin.role, name: admin.name });
+    const tokenStr = await createSession(admin._id, admin.role, res);
+    res.json({ token: tokenStr, role: admin.role, name: admin.name, id: admin._id });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -138,7 +163,21 @@ router.post("/accept-invite", async (req, res) => {
 
 // ─── GET /auth/me ─────────────────────────────────────────────────────────────
 router.get("/me", requireAuth, (req, res) => {
-  res.json(req.user);
+  res.json({ session: { type: req.user.role === 'cms' ? 'cms' : 'admin', admin: req.user.role === 'cms' ? null : req.user } });
+});
+
+// ─── POST /auth/logout ────────────────────────────────────────────────────────
+router.post("/logout", async (req, res) => {
+  try {
+    const token = req.cookies.sessionId;
+    if (token) {
+      await Session.deleteOne({ token });
+    }
+    res.clearCookie("sessionId");
+    res.json({ success: true, message: "Logged out successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── POST /auth/change-password ─────────────────────────────────────────────
@@ -178,6 +217,101 @@ router.post("/change-password", requireAuth, async (req, res) => {
     await admin.save();
 
     res.json({ success: true, message: "Password updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /auth/forgot-password ──────────────────────────────────────────────
+// Generates a 6-digit OTP and emails it to the registered admin address.
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "Email is required" });
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // CMS root cannot use OTP flow — they must remember their password
+    if (normalizedEmail === (process.env.CMS_EMAIL || "").toLowerCase().trim()) {
+      // Return generic success to prevent email enumeration
+      return res.json({ message: "If this email is registered, an OTP has been sent." });
+    }
+
+    const admin = await Admin.findOne({ email: normalizedEmail, status: 'active' });
+    // Always return success to prevent email enumeration
+    if (!admin) {
+      return res.json({ message: "If this email is registered, an OTP has been sent." });
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = await bcrypt.hash(otp, 10);
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+    admin.otp_hash = otpHash;
+    admin.otp_expires_at = expiresAt;
+    await admin.save();
+
+    console.log(`[ForgotPassword] 📧 Sending OTP to ${normalizedEmail}`);
+
+    const churchName = process.env.CHURCH_NAME || "Citadel of Truth and Mercy Assembly";
+    try {
+      await sendEmail({
+        to: admin.email,
+        name: admin.name || admin.email,
+        subject: `Password Reset OTP - ${churchName}`,
+        message: `Hi ${admin.name || 'Admin'},\n\nYou requested a password reset for your ChurchCMS account.\n\nYour one-time password (OTP) is:\n\n  ${otp}\n\nThis OTP is valid for 15 minutes. Do NOT share it with anyone.\n\nIf you did not request this, please ignore this email — your account remains secure.\n\n${churchName} Team`
+      });
+      console.log(`[ForgotPassword] ✅ OTP email sent to ${normalizedEmail}`);
+    } catch (mailErr) {
+      console.error(`[ForgotPassword] ❌ Failed to send OTP email:`, mailErr.message);
+      return res.status(500).json({ error: "Failed to send OTP email. Please try again later." });
+    }
+
+    res.json({ message: "If this email is registered, an OTP has been sent." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /auth/reset-password-otp ───────────────────────────────────────────
+// Verifies the OTP and sets a new password.
+router.post("/reset-password-otp", async (req, res) => {
+  try {
+    const { email, otp, password } = req.body;
+    if (!email || !otp || !password) {
+      return res.status(400).json({ error: "Email, OTP, and new password are required" });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const admin = await Admin.findOne({ email: normalizedEmail, status: 'active' });
+    if (!admin || !admin.otp_hash || !admin.otp_expires_at) {
+      return res.status(400).json({ error: "Invalid or expired OTP" });
+    }
+
+    // Check expiry
+    if (new Date() > admin.otp_expires_at) {
+      admin.otp_hash = null;
+      admin.otp_expires_at = null;
+      await admin.save();
+      return res.status(400).json({ error: "OTP has expired. Please request a new one." });
+    }
+
+    // Verify OTP
+    const otpValid = await bcrypt.compare(otp.trim(), admin.otp_hash);
+    if (!otpValid) {
+      return res.status(400).json({ error: "Invalid OTP. Please check and try again." });
+    }
+
+    // All good — update password
+    admin.password_hash = await bcrypt.hash(password, 12);
+    admin.must_change_password = false;
+    admin.otp_hash = null;
+    admin.otp_expires_at = null;
+    await admin.save();
+
+    console.log(`[ResetPassword] ✅ Password reset for ${normalizedEmail}`);
+    res.json({ success: true, message: "Password reset successfully. You can now log in." });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

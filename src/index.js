@@ -25,12 +25,14 @@ const PORT = process.env.PORT || 4000;
 connectDB();
 
 // ─── MIDDLEWARE ───────────────────────────────────────────────────────────────
+const cookieParser = require("cookie-parser");
 app.use(cors({
   origin: function (origin, callback) {
     callback(null, true);
   },
   credentials: true,
 }));
+app.use(cookieParser());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 

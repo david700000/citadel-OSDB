@@ -15,7 +15,10 @@ const AdminSchema = new mongoose.Schema({
         enum: ['invited', 'active', 'disabled'] 
     },
     must_change_password: { type: Boolean, default: false },
-    created_by: { type: String, default: 'cms' }
+    created_by: { type: String, default: 'cms' },
+    // OTP for forgot-password flow
+    otp_hash:       { type: String, default: null },
+    otp_expires_at: { type: Date,   default: null },
 }, { 
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } 
 });
