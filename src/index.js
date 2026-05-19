@@ -82,9 +82,28 @@ app.listen(PORT, async () => {
   // Start reminder scheduler
   try {
     await initScheduler();
-    console.log("⏰ Reminder scheduler started\n");
+    console.log("⏰ Reminder scheduler started");
   } catch (err) {
     console.warn("⚠️  Scheduler failed to start (DB may not be ready):", err.message);
+  }
+
+  // Seed default financial sections
+  try {
+    const FinancialSection = require("./models/FinancialSection");
+    const count = await FinancialSection.countDocuments();
+    if (count === 0) {
+      await FinancialSection.insertMany([
+        { name: "General", description: "General church operations and revenue" },
+        { name: "Salaries", description: "Staff salary and allowance payments" },
+        { name: "Missions", description: "Outreaches, evangelism, and community work" },
+        { name: "Welfare", description: "Charity, member support, and benevolence" },
+        { name: "Building", description: "Church construction and facility expansion" },
+        { name: "Youth", description: "Youth department events and programs" }
+      ]);
+      console.log("✅ Seeded default financial sections\n");
+    }
+  } catch (err) {
+    console.error("⚠️ Failed to seed default financial sections:", err.message);
   }
 });
 
