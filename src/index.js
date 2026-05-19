@@ -14,6 +14,8 @@ const attendanceRouter = require("./routes/attendance");
 const { adminsRouter, formFieldsRouter } = require("./routes/attendance");
 const settingsRouter = require("./routes/settings");
 const financialRouter = require("./routes/financial");
+const reportsRouter = require("./routes/reports");
+const databaseRouter = require("./routes/database");
 
 // Scheduler
 const { initScheduler } = require("./jobs/reminderScheduler");
@@ -63,6 +65,8 @@ app.use("/admins",      adminsRouter);
 app.use("/form-fields", formFieldsRouter);
 app.use("/settings",    settingsRouter);
 app.use("/financial",   financialRouter);
+app.use("/reports",     reportsRouter);
+app.use("/database",    databaseRouter);
 
 // ─── ERROR HANDLER ────────────────────────────────────────────────────────────
 app.use((err, req, res, next) => {

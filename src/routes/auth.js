@@ -1,12 +1,13 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken"); // Keep for any legacy endpoints if needed, otherwise optional
+const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { v4: uuidv4 } = require("uuid");
 const Admin = require("../models/Admin");
 const Invite = require("../models/Invite");
 const Session = require("../models/Session");
 const User = require("../models/User");
+const LoginAudit = require("../models/LoginAudit");
 const { requireCMS, requireAuth } = require("../middleware/auth");
 const { sendEmail } = require("../services/messaging");
 
@@ -49,26 +50,38 @@ router.post("/login", async (req, res) => {
 
     const normalizedEmail = email.toLowerCase().trim();
     const normalizedPassword = password.trim();
+    const ip = req.headers["x-forwarded-for"] || req.socket?.remoteAddress || null;
+    const ua = req.headers["user-agent"] || null;
 
     // CMS root account
     if (
       normalizedEmail === (process.env.CMS_EMAIL || "").toLowerCase().trim() &&
       normalizedPassword === (process.env.CMS_PASSWORD || "").trim()
     ) {
+      await LoginAudit.create({ email: normalizedEmail, name: "CMS Root", role: "cms", success: true, ip_address: ip, user_agent: ua }).catch(() => {});
       const token = await createSession("cms", "cms", res);
       return res.json({ token, role: "cms", name: "CMS Root", must_change_password: false });
     }
 
     // Admin account
-    const admin = await Admin.findOne({ email: normalizedEmail, status: 'active' });
-    if (!admin) return res.status(401).json({ error: "Invalid credentials" });
+    const admin = await Admin.findOne({ email: normalizedEmail });
+    if (!admin) {
+      await LoginAudit.create({ email: normalizedEmail, name: null, role: null, success: false, ip_address: ip, user_agent: ua, failure_reason: "Account not found" }).catch(() => {});
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+    if (admin.status !== "active") {
+      await LoginAudit.create({ email: normalizedEmail, name: admin.name, role: admin.role, success: false, ip_address: ip, user_agent: ua, failure_reason: `Account ${admin.status}` }).catch(() => {});
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
 
     const valid = await bcrypt.compare(normalizedPassword, admin.password_hash);
-    if (!valid) return res.status(401).json({ error: "Invalid credentials" });
+    if (!valid) {
+      await LoginAudit.create({ email: normalizedEmail, name: admin.name, role: admin.role, success: false, ip_address: ip, user_agent: ua, failure_reason: "Wrong password" }).catch(() => {});
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
 
+    await LoginAudit.create({ email: normalizedEmail, name: admin.name, role: admin.role, success: true, ip_address: ip, user_agent: ua }).catch(() => {});
     const token = await createSession(admin._id, admin.role, res);
-    
-    // Only send must_change_password: true when the DB flag is actually set
     res.json({ token, role: admin.role, name: admin.name, id: admin._id, must_change_password: !!admin.must_change_password });
   } catch (err) {
     res.status(500).json({ error: err.message });

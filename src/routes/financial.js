@@ -4,6 +4,7 @@ const FinancialSection = require("../models/FinancialSection");
 const SalaryLog = require("../models/SalaryLog");
 const FundRequest = require("../models/FundRequest");
 const Admin = require("../models/Admin");
+const User = require("../models/User");
 const { requireRole, requireAuth, requireCMS } = require("../middleware/auth");
 const { sendEmail } = require("../services/messaging");
 
@@ -11,8 +12,18 @@ const router = express.Router();
 
 // ─── GENERAL LEDGER ROUTES ───────────────────────────────────────────────────
 
-// GET /financial - Get all transactions (Financial Admin, Leader, CMS Root)
+// GET /financial - Get all active (non-voided) transactions (Financial Admin, Leader)
 router.get("/", requireRole("financial_admin", "leader"), async (req, res) => {
+  try {
+    const logs = await FinancialLog.find({ voided: { $ne: true } }).sort({ date: -1 });
+    res.json(logs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /financial/all-logs - Full audit log including voided (CMS Root only)
+router.get("/all-logs", requireCMS, async (req, res) => {
   try {
     const logs = await FinancialLog.find().sort({ date: -1 });
     res.json(logs);
@@ -45,7 +56,7 @@ router.post("/", requireRole("financial_admin"), async (req, res) => {
       logged_by_name: req.user.name || "Financial Admin"
     });
 
-    // Send notifications to all active leaders (using Naira symbol)
+    // Notify all active leaders
     const leaders = await Admin.find({ role: "leader", status: "active" });
     const churchName = process.env.CHURCH_NAME || "Citadel of Truth and Mercy Assembly";
     const appUrl = process.env.FRONTEND_URL || "http://localhost:5173";
@@ -56,7 +67,7 @@ router.post("/", requireRole("financial_admin"), async (req, res) => {
           to: leader.email,
           name: leader.name,
           subject: `New Financial Update - ${churchName}`,
-          message: `Hi ${leader.name},\n\nA new financial transaction has been logged:\n\nType: ${type.toUpperCase()}\nCategory: ${category}\nAmount: ₦${parseFloat(amount).toLocaleString()}\nDescription: ${description || "N/A"}\nLogged By: ${req.user.name || "Financial Admin"}\n\nPlease log in to your CitadelCMS dashboard to review and acknowledge this financial update:\n${appUrl}\n\nThank you!`
+          message: `Hi ${leader.name},\n\nA new financial transaction has been logged:\n\nType: ${type.toUpperCase()}\nCategory: ${category}\nAmount: ₦${parseFloat(amount).toLocaleString()}\nDescription: ${description || "N/A"}\nLogged By: ${req.user.name || "Financial Admin"}\n\nLog in to review and acknowledge:\n${appUrl}\n\nThank you!`
         });
       } catch (err) {
         console.error(`Failed to send financial email to leader ${leader.email}:`, err.message);
@@ -74,6 +85,7 @@ router.patch("/:id/acknowledge", requireRole("leader"), async (req, res) => {
   try {
     const log = await FinancialLog.findById(req.params.id);
     if (!log) return res.status(404).json({ error: "Financial record not found" });
+    if (log.voided) return res.status(400).json({ error: "Cannot acknowledge a voided record" });
 
     const alreadyAcked = log.acknowledgements.some(ack => ack.leader_id === req.user.id);
     if (alreadyAcked) {
@@ -93,21 +105,36 @@ router.patch("/:id/acknowledge", requireRole("leader"), async (req, res) => {
   }
 });
 
-// DELETE /financial/:id - Delete a transaction (Financial Admin)
-router.delete("/:id", requireRole("financial_admin"), async (req, res) => {
+// PATCH /financial/:id/void - Soft-delete (void) a transaction — requires reason (Financial Admin)
+// Records are NEVER hard-deleted. This only marks them as voided for audit trail.
+router.patch("/:id/void", requireRole("financial_admin"), async (req, res) => {
   try {
-    const deleted = await FinancialLog.findByIdAndDelete(req.params.id);
-    if (!deleted) return res.status(404).json({ error: "Financial record not found" });
-    res.json({ success: true, message: "Financial record deleted successfully" });
+    const { void_reason } = req.body;
+    if (!void_reason || !void_reason.trim()) {
+      return res.status(400).json({ error: "A void reason is required" });
+    }
+
+    const log = await FinancialLog.findById(req.params.id);
+    if (!log) return res.status(404).json({ error: "Financial record not found" });
+    if (log.voided) return res.status(400).json({ error: "Record is already voided" });
+
+    log.voided = true;
+    log.void_reason = void_reason.trim();
+    log.voided_by = req.user.id;
+    log.voided_by_name = req.user.name || "Financial Admin";
+    log.voided_at = new Date();
+    await log.save();
+
+    res.json({ success: true, message: "Record voided successfully", log });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 
-// ─── FINANCIAL SECTIONS (DEPARTMENTS) ROUTES ───────────────────────────────
+// ─── FINANCIAL SECTIONS (DEPARTMENTS) ROUTES ────────────────────────────────
 
-// GET /financial/sections - Get all sections
+// GET /financial/sections
 router.get("/sections", requireAuth, async (req, res) => {
   try {
     const sections = await FinancialSection.find().sort({ name: 1 });
@@ -117,7 +144,7 @@ router.get("/sections", requireAuth, async (req, res) => {
   }
 });
 
-// POST /financial/sections - Create a new section (CMS Root only)
+// POST /financial/sections (CMS Root only)
 router.post("/sections", requireCMS, async (req, res) => {
   try {
     const { name, description } = req.body;
@@ -126,32 +153,39 @@ router.post("/sections", requireCMS, async (req, res) => {
     const exists = await FinancialSection.findOne({ name: name.trim() });
     if (exists) return res.status(400).json({ error: "Section already exists" });
 
-    const section = await FinancialSection.create({
-      name: name.trim(),
-      description: description || ""
-    });
+    const section = await FinancialSection.create({ name: name.trim(), description: description || "" });
     res.status(201).json(section);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// DELETE /financial/sections/:id - Delete a section (CMS Root only)
+// DELETE /financial/sections/:id (CMS Root only)
 router.delete("/sections/:id", requireCMS, async (req, res) => {
   try {
     const deleted = await FinancialSection.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ error: "Section not found" });
-    res.json({ success: true, message: "Section deleted successfully" });
+    res.json({ success: true, message: "Section deleted" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 
-// ─── SALARY ROUTES ──────────────────────────────────────────────────────────
+// ─── SALARY ROUTES ───────────────────────────────────────────────────────────
 
-// GET /financial/salaries - Get all salary logs
+// GET /financial/salaries - Active salary logs only
 router.get("/salaries", requireRole("financial_admin", "leader"), async (req, res) => {
+  try {
+    const salaries = await SalaryLog.find({ voided: { $ne: true } }).sort({ createdAt: -1 });
+    res.json(salaries);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /financial/salaries/all - Full audit including voided (CMS Root)
+router.get("/salaries/all", requireCMS, async (req, res) => {
   try {
     const salaries = await SalaryLog.find().sort({ createdAt: -1 });
     res.json(salaries);
@@ -169,9 +203,7 @@ router.post("/salaries", requireRole("financial_admin"), async (req, res) => {
     }
 
     const log = await SalaryLog.create({
-      staff_name,
-      role,
-      month,
+      staff_name, role, month,
       amount: parseFloat(amount),
       status: status || "pending",
       payment_date: status === "paid" ? new Date() : null,
@@ -179,7 +211,6 @@ router.post("/salaries", requireRole("financial_admin"), async (req, res) => {
       logged_by_name: req.user.name || "Financial Admin"
     });
 
-    // If paid, auto-create expense log
     if (status === "paid") {
       await FinancialLog.create({
         type: "expense",
@@ -192,7 +223,6 @@ router.post("/salaries", requireRole("financial_admin"), async (req, res) => {
       });
     }
 
-    // Send notifications to all active leaders
     const leaders = await Admin.find({ role: "leader", status: "active" });
     const churchName = process.env.CHURCH_NAME || "Citadel of Truth and Mercy Assembly";
     const appUrl = process.env.FRONTEND_URL || "http://localhost:5173";
@@ -203,7 +233,7 @@ router.post("/salaries", requireRole("financial_admin"), async (req, res) => {
           to: leader.email,
           name: leader.name,
           subject: `New Salary Logged - ${churchName}`,
-          message: `Hi ${leader.name},\n\nA new salary payment has been logged:\n\nStaff Name: ${staff_name}\nRole: ${role}\nMonth: ${month}\nAmount: ₦${parseFloat(amount).toLocaleString()}\nStatus: ${(status || "pending").toUpperCase()}\nLogged By: ${req.user.name || "Financial Admin"}\n\nPlease log in to your CitadelCMS dashboard to review and acknowledge this salary payout:\n${appUrl}\n\nThank you!`
+          message: `Hi ${leader.name},\n\nA salary payment has been logged:\n\nStaff: ${staff_name}\nRole: ${role}\nMonth: ${month}\nAmount: ₦${parseFloat(amount).toLocaleString()}\nStatus: ${(status || "pending").toUpperCase()}\nLogged By: ${req.user.name || "Financial Admin"}\n\nReview on dashboard: ${appUrl}`
         });
       } catch (err) {
         console.error(`Failed to send salary email to leader ${leader.email}:`, err.message);
@@ -216,23 +246,21 @@ router.post("/salaries", requireRole("financial_admin"), async (req, res) => {
   }
 });
 
-// PATCH /financial/salaries/:id/acknowledge - Acknowledge a salary log (Leader)
+// PATCH /financial/salaries/:id/acknowledge (Leader)
 router.patch("/salaries/:id/acknowledge", requireRole("leader"), async (req, res) => {
   try {
     const log = await SalaryLog.findById(req.params.id);
     if (!log) return res.status(404).json({ error: "Salary log not found" });
+    if (log.voided) return res.status(400).json({ error: "Cannot acknowledge a voided record" });
 
     const alreadyAcked = log.acknowledgements.some(ack => ack.leader_id === req.user.id);
-    if (alreadyAcked) {
-      return res.status(400).json({ error: "Already acknowledged by this leader" });
-    }
+    if (alreadyAcked) return res.status(400).json({ error: "Already acknowledged" });
 
     log.acknowledgements.push({
       leader_id: req.user.id,
       leader_name: req.user.name || "Leader",
       acknowledged_at: new Date()
     });
-
     await log.save();
     res.json(log);
   } catch (err) {
@@ -240,12 +268,26 @@ router.patch("/salaries/:id/acknowledge", requireRole("leader"), async (req, res
   }
 });
 
-// DELETE /financial/salaries/:id - Delete a salary log (Financial Admin)
-router.delete("/salaries/:id", requireRole("financial_admin"), async (req, res) => {
+// PATCH /financial/salaries/:id/void - Soft-delete salary log (Financial Admin)
+router.patch("/salaries/:id/void", requireRole("financial_admin"), async (req, res) => {
   try {
-    const deleted = await SalaryLog.findByIdAndDelete(req.params.id);
-    if (!deleted) return res.status(404).json({ error: "Salary log not found" });
-    res.json({ success: true, message: "Salary log deleted successfully" });
+    const { void_reason } = req.body;
+    if (!void_reason || !void_reason.trim()) {
+      return res.status(400).json({ error: "A void reason is required" });
+    }
+
+    const log = await SalaryLog.findById(req.params.id);
+    if (!log) return res.status(404).json({ error: "Salary log not found" });
+    if (log.voided) return res.status(400).json({ error: "Record is already voided" });
+
+    log.voided = true;
+    log.void_reason = void_reason.trim();
+    log.voided_by = req.user.id;
+    log.voided_by_name = req.user.name || "Financial Admin";
+    log.voided_at = new Date();
+    await log.save();
+
+    res.json({ success: true, message: "Salary log voided", log });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -254,7 +296,7 @@ router.delete("/salaries/:id", requireRole("financial_admin"), async (req, res) 
 
 // ─── FUND REQUEST ROUTES ─────────────────────────────────────────────────────
 
-// GET /financial/fund-requests - Get all fund requests
+// GET /financial/fund-requests
 router.get("/fund-requests", requireRole("financial_admin", "leader"), async (req, res) => {
   try {
     const requests = await FundRequest.find().sort({ createdAt: -1 });
@@ -264,7 +306,7 @@ router.get("/fund-requests", requireRole("financial_admin", "leader"), async (re
   }
 });
 
-// POST /financial/fund-requests - Create a fund request (Financial Admin)
+// POST /financial/fund-requests
 router.post("/fund-requests", requireRole("financial_admin"), async (req, res) => {
   try {
     const { title, amount, description, department } = req.body;
@@ -276,14 +318,10 @@ router.post("/fund-requests", requireRole("financial_admin"), async (req, res) =
       requester_id: req.user.id,
       requester_name: req.user.name || "Financial Admin",
       requester_role: req.user.role,
-      title,
-      amount: parseFloat(amount),
-      description,
-      department,
+      title, amount: parseFloat(amount), description, department,
       status: "pending"
     });
 
-    // Notify leaders of the new request
     const leaders = await Admin.find({ role: "leader", status: "active" });
     const churchName = process.env.CHURCH_NAME || "Citadel of Truth and Mercy Assembly";
     const appUrl = process.env.FRONTEND_URL || "http://localhost:5173";
@@ -291,13 +329,12 @@ router.post("/fund-requests", requireRole("financial_admin"), async (req, res) =
     for (const leader of leaders) {
       try {
         await sendEmail({
-          to: leader.email,
-          name: leader.name,
+          to: leader.email, name: leader.name,
           subject: `New Fund Request - ${churchName}`,
-          message: `Hi ${leader.name},\n\nA new fund request requires your review:\n\nProject: ${title}\nDepartment: ${department}\nAmount: ₦${parseFloat(amount).toLocaleString()}\nDescription: ${description}\nRequested By: ${req.user.name || "Financial Admin"}\n\nPlease review and action this request on your dashboard:\n${appUrl}\n\nThank you!`
+          message: `Hi ${leader.name},\n\nNew fund request requires review:\n\nProject: ${title}\nDepartment: ${department}\nAmount: ₦${parseFloat(amount).toLocaleString()}\nDescription: ${description}\nRequested By: ${req.user.name || "Financial Admin"}\n\nReview on dashboard: ${appUrl}`
         });
       } catch (err) {
-        console.error(`Failed to send fund request email to leader ${leader.email}:`, err.message);
+        console.error(`Failed to send fund request email to ${leader.email}:`, err.message);
       }
     }
 
@@ -307,7 +344,7 @@ router.post("/fund-requests", requireRole("financial_admin"), async (req, res) =
   }
 });
 
-// PATCH /financial/fund-requests/:id/resolve - Approve or reject request (Leader)
+// PATCH /financial/fund-requests/:id/resolve (Leader)
 router.patch("/fund-requests/:id/resolve", requireRole("leader"), async (req, res) => {
   try {
     const { status, rejection_reason } = req.body;
@@ -323,13 +360,10 @@ router.patch("/fund-requests/:id/resolve", requireRole("leader"), async (req, re
     request.resolved_by = req.user.id;
     request.resolved_by_name = req.user.name || "Leader";
     request.resolved_at = new Date();
-    if (status === "rejected") {
-      request.rejection_reason = rejection_reason || "No reason provided";
-    }
+    if (status === "rejected") request.rejection_reason = rejection_reason || "No reason provided";
 
     await request.save();
 
-    // If approved, automatically create a general ledger expense log!
     if (status === "approved") {
       await FinancialLog.create({
         type: "expense",
@@ -342,19 +376,17 @@ router.patch("/fund-requests/:id/resolve", requireRole("leader"), async (req, re
       });
     }
 
-    // Notify the requester of the result
     const requester = await Admin.findById(request.requester_id);
     if (requester) {
       const churchName = process.env.CHURCH_NAME || "Citadel of Truth and Mercy Assembly";
       try {
         await sendEmail({
-          to: requester.email,
-          name: requester.name,
+          to: requester.email, name: requester.name,
           subject: `Fund Request Update - ${churchName}`,
           message: `Hi ${requester.name},\n\nYour fund request has been reviewed:\n\nProject: ${request.title}\nAmount: ₦${request.amount.toLocaleString()}\nStatus: ${status.toUpperCase()}\nReviewed By: ${req.user.name || "Leader"}\n${status === "rejected" ? `Reason: ${rejection_reason || "N/A"}` : ""}\n\nThank you!`
         });
       } catch (err) {
-        console.error(`Failed to send fund request update email to requester ${requester.email}:`, err.message);
+        console.error(`Failed to send fund request update email:`, err.message);
       }
     }
 
