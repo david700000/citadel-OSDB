@@ -66,47 +66,93 @@ function normalisePhone(raw) {
   return "+" + digits;
 }
 
-// ─── SEND EMAIL ───────────────────────────────────────────────────────────────
+// ─── EMAIL HTML BUILDER ───────────────────────────────────────────────────────
+function buildEmailHtml({ name, message }) {
+  const churchName = process.env.CHURCH_NAME || "Our Church";
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:'Segoe UI',Arial,sans-serif;">
+  <div style="max-width:560px;margin:32px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+    <div style="background:#0B1F3B;padding:28px 32px;text-align:center;">
+      <h1 style="color:#F4C430;margin:0;font-size:22px;font-weight:800;">${churchName}</h1>
+    </div>
+    <div style="padding:32px;">
+      <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.7;">Hi <strong>${name || "Friend"}</strong>,</p>
+      <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.7;">${message.replace(/\n/g, "<br>")}</p>
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;">
+      <p style="margin:0;color:#9ca3af;font-size:12px;">
+        ${churchName} &bull; ${process.env.CHURCH_ADDRESS || ""}<br>
+        <a href="${process.env.CHURCH_WEBSITE || "#"}" style="color:#0B1F3B;">${process.env.CHURCH_WEBSITE || ""}</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+// ─── SEND EMAIL VIA BREVO HTTP API (works on Render free tier) ───────────────
+async function sendViaBrevoAPI({ to, name, subject, message }) {
+  const churchName = process.env.CHURCH_NAME || "Our Church";
+  const senderEmail = process.env.EMAIL_FROM || process.env.SMTP_USER;
+  const senderName  = process.env.EMAIL_FROM_NAME || churchName;
+
+  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "accept": "application/json",
+      "api-key": process.env.BREVO_API_KEY,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      sender: { name: senderName, email: senderEmail },
+      to: [{ email: to, name: name || "" }],
+      subject: subject || `Message from ${churchName}`,
+      textContent: message,
+      htmlContent: buildEmailHtml({ name, message }),
+    }),
+  });
+
+  if (!response.ok) {
+    const errBody = await response.json().catch(() => ({}));
+    throw new Error(`Brevo API ${response.status}: ${errBody.message || response.statusText}`);
+  }
+
+  const result = await response.json();
+  console.log(`[Email] ✅ Sent via Brevo API to ${to} — messageId: ${result.messageId}`);
+  return result;
+}
+
+// ─── SEND EMAIL (primary: Brevo API | fallback: SMTP) ────────────────────────
 async function sendEmail({ to, name, subject, message }) {
+  // ── Path 1: Brevo HTTP API (preferred — always works on Render free tier)
+  if (process.env.BREVO_API_KEY) {
+    try {
+      return await sendViaBrevoAPI({ to, name, subject, message });
+    } catch (err) {
+      console.error(`[Email] ❌ Brevo API failed for ${to}:`, err.message);
+      throw err;
+    }
+  }
+
+  // ── Path 2: SMTP fallback (for self-hosted / local dev)
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
-    console.warn("[Email] SMTP not configured — skipping.");
+    console.warn("[Email] No BREVO_API_KEY and no SMTP configured — skipping email.");
     return { skipped: true };
   }
-  const churchName = process.env.CHURCH_NAME || "Our Church";
-  const html = `
-    <!DOCTYPE html>
-    <html>
-    <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-    <body style="margin:0;padding:0;background:#f8fafc;font-family:'Segoe UI',Arial,sans-serif;">
-      <div style="max-width:560px;margin:32px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
-        <div style="background:#0B1F3B;padding:28px 32px;text-align:center;">
-          <h1 style="color:#F4C430;margin:0;font-size:22px;font-weight:800;">${churchName}</h1>
-        </div>
-        <div style="padding:32px;">
-          <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.7;">Hi <strong>${name || "Friend"}</strong>,</p>
-          <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.7;">${message.replace(/\n/g, "<br>")}</p>
-          <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;">
-          <p style="margin:0;color:#9ca3af;font-size:12px;">
-            ${churchName} &bull; ${process.env.CHURCH_ADDRESS || ""}<br>
-            <a href="${process.env.CHURCH_WEBSITE || "#"}" style="color:#0B1F3B;">${process.env.CHURCH_WEBSITE || ""}</a>
-          </p>
-        </div>
-      </div>
-    </body>
-    </html>
-  `;
   try {
+    const churchName = process.env.CHURCH_NAME || "Our Church";
     const result = await emailTransporter.sendMail({
       from: `"${process.env.EMAIL_FROM_NAME || churchName}" <${process.env.EMAIL_FROM || process.env.SMTP_USER}>`,
       to,
       subject: subject || `Message from ${churchName}`,
       text: message,
-      html,
+      html: buildEmailHtml({ name, message }),
     });
-    console.log(`[Email] ✅ Sent to ${to} — MessageID: ${result.messageId}`);
+    console.log(`[Email] ✅ Sent via SMTP to ${to} — MessageID: ${result.messageId}`);
     return result;
   } catch (err) {
-    console.error(`[Email] ❌ Failed to send to ${to}:`, err.message);
+    console.error(`[Email] ❌ SMTP failed for ${to}:`, err.message);
     throw err;
   }
 }
