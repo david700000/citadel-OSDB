@@ -5,7 +5,8 @@ const bcrypt = require('bcryptjs');
 
 async function fixAdmin() {
     await mongoose.connect(process.env.MONGODB_URI);
-    const admins = await Admin.find({ role: { $ne: 'cms' } });
+    // Only reset financial_admin accounts - leaders are invite-only
+    const admins = await Admin.find({ role: { $nin: ['cms', 'leader'] } });
     for (const admin of admins) {
         console.log("Resetting admin:", admin.email);
         const newPass = "Admin123!";
