@@ -18,7 +18,12 @@ async function requireAuth(req, res, next) {
     const session = await Session.findOne({ token });
     if (!session || session.expires_at < new Date()) {
       if (session) await Session.deleteOne({ _id: session._id });
-      res.clearCookie("sessionId");
+      const isProduction = process.env.NODE_ENV === "production" || (req.headers.origin && !req.headers.origin.includes("localhost"));
+      res.clearCookie("sessionId", {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: isProduction ? "none" : "lax"
+      });
       return res.status(401).json({ error: "Session expired or invalid" });
     }
 

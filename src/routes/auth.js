@@ -29,10 +29,12 @@ async function createSession(userId, role, res) {
     expires_at: expiresAt
   });
 
+  const req = res.req;
+  const isProduction = process.env.NODE_ENV === "production" || (req && req.headers.origin && !req.headers.origin.includes("localhost"));
   res.cookie("sessionId", token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
     maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
   });
 
@@ -182,7 +184,12 @@ router.post("/logout", async (req, res) => {
     if (token) {
       await Session.deleteOne({ token });
     }
-    res.clearCookie("sessionId");
+    const isProduction = process.env.NODE_ENV === "production" || (req.headers.origin && !req.headers.origin.includes("localhost"));
+    res.clearCookie("sessionId", {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax"
+    });
     res.json({ success: true, message: "Logged out successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
