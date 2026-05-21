@@ -5,10 +5,38 @@ const SalaryLog = require("../models/SalaryLog");
 const FundRequest = require("../models/FundRequest");
 const Admin = require("../models/Admin");
 const User = require("../models/User");
+const PendingNotification = require("../models/PendingNotification");
 const { requireRole, requireAuth, requireCMS } = require("../middleware/auth");
 const { sendEmail } = require("../services/messaging");
 
 const router = express.Router();
+
+// Helper to queue a 30-minute delayed financial notification (batched)
+async function queueFinancialNotification() {
+  try {
+    const delayMs = 30 * 60 * 1000; // 30 minutes
+    const sendAt = new Date(Date.now() + delayMs);
+
+    const existing = await PendingNotification.findOne({
+      type: "financial_update",
+      status: "pending"
+    });
+
+    if (!existing) {
+      await PendingNotification.create({
+        type: "financial_update",
+        send_at: sendAt,
+        status: "pending"
+      });
+      console.log(`[NotificationQueue] Queued a new financial notification to fire at ${sendAt.toISOString()}`);
+    } else {
+      console.log(`[NotificationQueue] A pending financial notification is already scheduled for ${existing.send_at.toISOString()}. Skipping duplicate.`);
+    }
+  } catch (err) {
+    console.error(`[NotificationQueue] Error queuing notification:`, err.message);
+  }
+}
+
 
 // ─── GENERAL LEDGER ROUTES ───────────────────────────────────────────────────
 
@@ -56,23 +84,8 @@ router.post("/", requireRole("finance_admin"), async (req, res) => {
       logged_by_name: req.user.name || "finance admin"
     });
 
-    // Notify all active leaders
-    const leaders = await Admin.find({ role: "leader", status: "active" });
-    const churchName = process.env.CHURCH_NAME || "Citadel of Truth and Mercy Assembly";
-    const appUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-
-    for (const leader of leaders) {
-      try {
-        await sendEmail({
-          to: leader.email,
-          name: leader.name,
-          subject: `New Financial Update - ${churchName}`,
-          message: `Hi ${leader.name},\n\nA new financial transaction has been logged:\n\nType: ${type.toUpperCase()}\nCategory: ${category}\nAmount: ₦${parseFloat(amount).toLocaleString()}\nDescription: ${description || "N/A"}\nLogged By: ${req.user.name || "finance admin"}\n\nLog in to review and acknowledge:\n${appUrl}\n\nThank you!`
-        });
-      } catch (err) {
-        console.error(`Failed to send financial email to leader ${leader.email}:`, err.message);
-      }
-    }
+    // Queue 30-minute delayed notification for leaders
+    await queueFinancialNotification();
 
     res.status(201).json(log);
   } catch (err) {
@@ -242,22 +255,8 @@ router.post("/salaries", requireRole("finance_admin"), async (req, res) => {
       });
     }
 
-    const leaders = await Admin.find({ role: "leader", status: "active" });
-    const churchName = process.env.CHURCH_NAME || "Citadel of Truth and Mercy Assembly";
-    const appUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-
-    for (const leader of leaders) {
-      try {
-        await sendEmail({
-          to: leader.email,
-          name: leader.name,
-          subject: `New Salary Logged - ${churchName}`,
-          message: `Hi ${leader.name},\n\nA salary payment has been logged:\n\nStaff: ${staff_name}\nRole: ${role}\nMonth: ${month}\nAmount: ₦${parseFloat(amount).toLocaleString()}\nStatus: ${(status || "pending").toUpperCase()}\nLogged By: ${req.user.name || "finance admin"}\n\nReview on dashboard: ${appUrl}`
-        });
-      } catch (err) {
-        console.error(`Failed to send salary email to leader ${leader.email}:`, err.message);
-      }
-    }
+    // Queue 30-minute delayed notification for leaders
+    await queueFinancialNotification();
 
     res.status(201).json(log);
   } catch (err) {

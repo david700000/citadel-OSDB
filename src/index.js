@@ -19,6 +19,7 @@ const databaseRouter = require("./routes/database");
 
 // Scheduler
 const { initScheduler } = require("./jobs/reminderScheduler");
+const { initNotificationQueue } = require("./jobs/notificationQueue");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -83,12 +84,19 @@ app.listen(PORT, async () => {
   console.log(`   Firebase    : ${process.env.FIREBASE_PROJECT_ID ? "✅ configured (Push Notifications enabled)" : "⚠️  not configured (Push disabled)"}`);
   console.log(`   SMS via     : ${process.env.SMS_PROVIDER === "termii" ? "✅ Termii" : "⚠️  disabled (Twilio removed)"}\n`);
 
-  // Start reminder scheduler
+  // Start reminder scheduler & notification queue
   try {
     await initScheduler();
     console.log("⏰ Reminder scheduler started");
   } catch (err) {
     console.warn("⚠️  Scheduler failed to start (DB may not be ready):", err.message);
+  }
+
+  try {
+    initNotificationQueue();
+    console.log("⏰ Notification queue processor started");
+  } catch (err) {
+    console.warn("⚠️ Notification queue failed to start:", err.message);
   }
 
   // Seed default financial sections
