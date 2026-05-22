@@ -49,6 +49,10 @@ router.post("/register/first-timer", async (req, res) => {
     handleWelcome(user);
     res.status(201).json({ user, message: "Welcome! Registered as first-timer" });
   } catch (err) {
+    // Handle duplicate email (MongoDB E11000)
+    if (err.code === 11000 || err.name === "MongoServerError" && err.message.includes("duplicate key")) {
+      return res.status(409).json({ error: "This email address is already registered. Please use a different email." });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -56,7 +60,7 @@ router.post("/register/first-timer", async (req, res) => {
 // ─── POST /users/register/member-worker ──────────────────────────────────────
 router.post("/register/member-worker", async (req, res) => {
   try {
-    const { full_name, email, phone, role_type, department, ...extra } = req.body;
+    const { full_name, email, phone, role_type, department, date_of_birth, ...extra } = req.body;
     if (!full_name) return res.status(400).json({ error: "Full name is required" });
 
     const tag = role_type === "Worker" ? "worker" : "member";
@@ -66,6 +70,7 @@ router.post("/register/member-worker", async (req, res) => {
       phone: phone || undefined,
       tag,
       department: tag === "worker" ? department : undefined,
+      date_of_birth: date_of_birth ? new Date(date_of_birth) : undefined,
       extra_fields: extra || {},
       fcm_tokens: req.body.fcm_token ? [req.body.fcm_token] : []
     });
@@ -73,6 +78,10 @@ router.post("/register/member-worker", async (req, res) => {
     handleWelcome(user);
     res.status(201).json({ user, message: `Registered successfully as ${tag}` });
   } catch (err) {
+    // Handle duplicate email (MongoDB E11000)
+    if (err.code === 11000 || err.name === "MongoServerError" && err.message.includes("duplicate key")) {
+      return res.status(409).json({ error: "This email address is already registered. Please use a different email." });
+    }
     res.status(500).json({ error: err.message });
   }
 });
