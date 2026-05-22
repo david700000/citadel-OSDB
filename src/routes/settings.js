@@ -18,6 +18,12 @@ router.get("/", async (req, res) => {
       const church = process.env.CHURCH_NAME || "our church";
       settingsMap.welcome_message = `Welcome to ${church}, {name}! 🙏\n\nWe're so glad you joined us today. Our team will be in touch with you soon.\n\nIf you have any questions, feel free to reach us at ${process.env.CHURCH_PHONE || ""}.\n\nGod bless you! ✨`;
     }
+
+    // Provide a default if birthday_message is not set in DB
+    if (!settingsMap.birthday_message) {
+      const church = process.env.CHURCH_NAME || "Citadel";
+      settingsMap.birthday_message = `🎂 Happy Birthday, {name}!\n\nOn behalf of everyone at ${church}, we want to wish you a truly blessed and joyful birthday. May this new year of your life be filled with God's grace, good health, and overflowing happiness.\n\nWe celebrate you today and always! 🎉🙏`;
+    }
     
     res.json(settingsMap);
   } catch (err) {

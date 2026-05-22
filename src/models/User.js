@@ -10,6 +10,8 @@ const UserSchema = new mongoose.Schema({
         enum: ['first_timer', 'member', 'worker'] 
     },
     department: { type: String },
+    date_of_birth: { type: Date },
+    birthday_greeted_year: { type: Number }, // tracks last year we sent a greeting (prevents duplicates)
     fcm_tokens: [{ type: String }],
     extra_fields: { type: Map, of: mongoose.Schema.Types.Mixed, default: {} }
 }, { 
@@ -18,5 +20,7 @@ const UserSchema = new mongoose.Schema({
 
 // Index for frequent lookups by tag
 UserSchema.index({ tag: 1 });
+// Index to efficiently find users with a date_of_birth set
+UserSchema.index({ date_of_birth: 1 });
 
 module.exports = mongoose.model('User', UserSchema);

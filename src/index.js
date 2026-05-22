@@ -20,6 +20,7 @@ const databaseRouter = require("./routes/database");
 // Scheduler
 const { initScheduler } = require("./jobs/reminderScheduler");
 const { initNotificationQueue } = require("./jobs/notificationQueue");
+const { initBirthdayScheduler } = require("./jobs/birthdayScheduler");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -97,6 +98,13 @@ app.listen(PORT, async () => {
     console.log("⏰ Notification queue processor started");
   } catch (err) {
     console.warn("⚠️ Notification queue failed to start:", err.message);
+  }
+
+  try {
+    initBirthdayScheduler();
+    console.log("🎂 Birthday scheduler started");
+  } catch (err) {
+    console.warn("⚠️ Birthday scheduler failed to start:", err.message);
   }
 
   // Seed default financial sections

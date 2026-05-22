@@ -20,7 +20,8 @@ async function seed() {
             { form_type: 'member_worker', field_key: 'email', label: 'Email Address', type: 'text', options: [], required: true, worker_only: false, sort_order: 2 },
             { form_type: 'member_worker', field_key: 'phone', label: 'Phone Number', type: 'text', options: [], required: true, worker_only: false, sort_order: 3 },
             { form_type: 'member_worker', field_key: 'role_type', label: 'I am a', type: 'dropdown', options: ["Member", "Worker"], required: true, worker_only: false, sort_order: 4 },
-            { form_type: 'member_worker', field_key: 'department', label: 'Department', type: 'dropdown', options: ["Media", "Ushering", "Security", "Choir"], required: true, worker_only: true, sort_order: 5 }
+            { form_type: 'member_worker', field_key: 'department', label: 'Department', type: 'dropdown', options: ["Media", "Ushering", "Security", "Choir"], required: true, worker_only: true, sort_order: 5 },
+            { form_type: 'member_worker', field_key: 'date_of_birth', label: 'Date of Birth', type: 'date', options: [], required: true, worker_only: false, sort_order: 6 }
         ];
 
         for (const f of fields) {
