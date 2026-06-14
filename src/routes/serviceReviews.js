@@ -25,34 +25,8 @@ const sanitizeRating = (val) => {
   return n;
 };
 
-// ─── GET /service-reviews/ping  (public — DB write test) ────────────────────
-router.get("/ping", async (req, res) => {
-  try {
-    const mongoose = require("mongoose");
-    const db = mongoose.connection.readyState;
-    // Try a minimal test save with all required fields
-    const test = new ServiceReview({
-      full_name: "ping-test",
-      role: "member",
-      service_date: new Date(),
-      service_type: "sunday_service",
-      worship_team_leading: 5, sound_audio_quality: 5, song_selection: 5,
-      welcoming_atmosphere: 5, usher_seating_order: 5, offering_transitions: 5,
-      children_youth_engagement: 5, children_area_safety: 5, materials_teachers_prepared: 5,
-      projection_displays: 5, livestream_quality: 5, media_transitions: 5,
-      service_start_time: 5, overall_time_management: 5, teams_ready_before_service: 5,
-    });
-    await test.save();
-    await ServiceReview.findByIdAndDelete(test._id); // clean up immediately
-    res.json({ ok: true, db_state: db, msg: "Write test passed" });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message, type: err.name, code: err.code });
-  }
-});
-
 // ─── POST /service-reviews  (public — no auth) ───────────────────────────────
 router.post("/", async (req, res) => {
-
   try {
     const {
       full_name,
@@ -137,8 +111,8 @@ router.post("/", async (req, res) => {
     await review.save();
     res.status(201).json({ message: "Review submitted successfully.", id: review._id });
   } catch (err) {
-    console.error("[ServiceReviews] POST error:", err.message, err.stack);
-    res.status(500).json({ error: "Failed to submit review. Please try again.", _debug: err.message, _type: err.name });
+    console.error("[ServiceReviews] POST error:", err.message);
+    res.status(500).json({ error: "Failed to submit review. Please try again." });
   }
 });
 
