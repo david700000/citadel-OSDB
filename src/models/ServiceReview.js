@@ -82,7 +82,7 @@ const ServiceReviewSchema = new mongoose.Schema(
 );
 
 // Compute overall_average before saving
-ServiceReviewSchema.pre("save", function (next) {
+ServiceReviewSchema.pre("save", function () {
   const ratings = [
     this.worship_team_leading,
     this.sound_audio_quality,
@@ -102,7 +102,6 @@ ServiceReviewSchema.pre("save", function (next) {
   ];
   const sum = ratings.reduce((a, b) => a + b, 0);
   this.overall_average = Math.round((sum / ratings.length) * 10) / 10;
-  next();
 });
 
 module.exports = mongoose.model("ServiceReview", ServiceReviewSchema);
