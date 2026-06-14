@@ -32,15 +32,24 @@ async function fireBirthdayGreetings() {
 
     console.log(`[Birthday] Checking birthdays for ${todayMonth}/${todayDay}/${currentYear}...`);
 
-    // Find members and workers who have a date_of_birth set
+    // Find members and workers who have a date_of_birth set (either top-level or in extra_fields)
     // and haven't been greeted this calendar year yet
     const allUsers = await User.find({
       tag: { $in: ["member", "worker"] },
-      date_of_birth: { $exists: true, $ne: null },
-      $or: [
-        { birthday_greeted_year: { $exists: false } },
-        { birthday_greeted_year: { $ne: currentYear } },
-      ],
+      $and: [
+        {
+          $or: [
+            { date_of_birth: { $exists: true, $ne: null } },
+            { "extra_fields.date_of_birth": { $exists: true, $ne: null } }
+          ]
+        },
+        {
+          $or: [
+            { birthday_greeted_year: { $exists: false } },
+            { birthday_greeted_year: { $ne: currentYear } }
+          ]
+        }
+      ]
     }).select("full_name email phone fcm_tokens date_of_birth extra_fields birthday_greeted_year");
 
     // Filter by today's month+day — works regardless of year stored in DOB

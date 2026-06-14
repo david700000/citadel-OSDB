@@ -11,6 +11,14 @@ const { sendEmail } = require("../services/messaging");
 
 const router = express.Router();
 
+// Helper to calculate current net balance
+async function getCurrentNetBalance() {
+  const logs = await FinancialLog.find({ voided: { $ne: true } });
+  const totalIncome = logs.filter(l => l.type === "income").reduce((sum, l) => sum + l.amount, 0);
+  const totalExpense = logs.filter(l => l.type === "expense").reduce((sum, l) => sum + l.amount, 0);
+  return totalIncome - totalExpense;
+}
+
 // Helper to queue a 30-minute delayed financial notification (batched)
 async function queueFinancialNotification() {
   try {
@@ -72,6 +80,13 @@ router.post("/", requireRole("finance_admin"), async (req, res) => {
     }
     if (isNaN(amount) || parseFloat(amount) <= 0) {
       return res.status(400).json({ error: "Amount must be a positive number" });
+    }
+
+    if (type === "expense") {
+      const netBalance = await getCurrentNetBalance();
+      if (parseFloat(amount) > netBalance) {
+        return res.status(400).json({ error: `Insufficient funds. Current net balance is ₦${netBalance.toLocaleString()}` });
+      }
     }
 
     const log = await FinancialLog.create({
@@ -234,6 +249,13 @@ router.post("/salaries", requireRole("finance_admin"), async (req, res) => {
       return res.status(400).json({ error: "All fields are required" });
     }
 
+    if (status === "paid") {
+      const netBalance = await getCurrentNetBalance();
+      if (parseFloat(amount) > netBalance) {
+        return res.status(400).json({ error: `Insufficient funds to pay salary. Current net balance is ₦${netBalance.toLocaleString()}` });
+      }
+    }
+
     const log = await SalaryLog.create({
       staff_name, role, month,
       amount: parseFloat(amount),
@@ -392,6 +414,13 @@ router.patch("/fund-requests/:id/resolve", requireRole("leader"), async (req, re
     const request = await FundRequest.findById(req.params.id);
     if (!request) return res.status(404).json({ error: "Fund request not found" });
     if (request.status !== "pending") return res.status(400).json({ error: "Request is already resolved" });
+
+    if (status === "approved") {
+      const netBalance = await getCurrentNetBalance();
+      if (request.amount > netBalance) {
+        return res.status(400).json({ error: `Insufficient funds to approve request. Current net balance is ₦${netBalance.toLocaleString()}` });
+      }
+    }
 
     request.status = status;
     request.resolved_by = req.user.id;
