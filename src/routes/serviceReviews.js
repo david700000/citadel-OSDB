@@ -111,8 +111,8 @@ router.post("/", async (req, res) => {
     await review.save();
     res.status(201).json({ message: "Review submitted successfully.", id: review._id });
   } catch (err) {
-    console.error("[ServiceReviews] POST error:", err.message);
-    res.status(500).json({ error: "Failed to submit review. Please try again." });
+    console.error("[ServiceReviews] POST error:", err.message, err.stack);
+    res.status(500).json({ error: "Failed to submit review. Please try again.", _debug: err.message, _type: err.name });
   }
 });
 
