@@ -70,6 +70,12 @@ router.delete("/purge/:target", requireCMS, async (req, res) => {
       results.audits = "Cleared";
     }
 
+    if (target === "service_reviews" || target === "all") {
+      const ServiceReview = require("../models/ServiceReview");
+      await ServiceReview.deleteMany({});
+      results.service_reviews = "Cleared";
+    }
+
     if (Object.keys(results).length === 0) {
       return res.status(400).json({ error: "Unknown target for purge." });
     }
